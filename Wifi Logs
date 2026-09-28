@@ -1,0 +1,107 @@
+import time
+import csv
+from datetime import datetime
+import pywifi
+from pywifi import const
+
+def get_akm_name(akm_list):
+    if not akm_list or const.AKM_TYPE_NONE in akm_list:
+        return "AÇIK (Şifresiz)"
+    
+    types = []
+    for akm in akm_list:
+        if akm == const.AKM_TYPE_WPA:
+            types.append("WPA")
+        elif akm == const.AKM_TYPE_WPAPSK:
+            types.append("WPA-PSK")
+        elif akm == const.AKM_TYPE_WPA2:
+            types.append("WPA2")
+        elif akm == const.AKM_TYPE_WPA2PSK:
+            types.append("WPA2-PSK")
+        else:
+            types.append(f"Diğer({akm})")
+    return "/".join(types)
+
+def get_cipher_name(cipher):
+    if cipher == const.CIPHER_TYPE_CCMP:
+        return "AES (CCMP)"
+    elif cipher == const.CIPHER_TYPE_TKIP:
+        return "TKIP"
+    elif cipher == const.CIPHER_TYPE_NONE:
+        return "Yok"
+    return f"Bilinmeyen ({cipher})"
+
+def dbm_to_quality(signal_dbm):
+    if signal_dbm <= -100:
+        return 0
+    elif signal_dbm >= -50:
+        return 100
+    else:
+        return 2 * (signal_dbm + 100)
+
+def etraftaki_wifilari_tara(log_to_file=True):
+    wifi = pywifi.PyWiFi()
+    
+    if not wifi.interfaces():
+        print("[!] Hiçbir Wi-Fi kartı bulunamadı!")
+        return
+
+    iface = wifi.interfaces()[0]
+
+    print(f"Kullanılan Ağ Kartı : {iface.name()}")
+    print("Yakındaki Wi-Fi ağları taranıyor, lütfen bekleyin...\n")
+
+    iface.scan()
+    time.sleep(3)
+
+    scan_results = iface.scan_results()
+    gorulen_bssidler = set()
+    collected_data = []
+
+    print(f"{'SSID (Ağ Adı)':<22} {'BSSID (MAC)':<18} {'Sinyal':<12} {'Güvenlik':<15} {'Şifreleme':<12}")
+    print("-" * 82)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    for network in scan_results:
+        if network.bssid in gorulen_bssidler:
+            continue
+        
+        gorulen_bssidler.add(network.bssid)
+        ssid = network.ssid if network.ssid else "<Gizli Ağ>"
+        
+        quality = dbm_to_quality(network.signal)
+        signal_str = f"{network.signal}dBm (%{quality})"
+        security = get_akm_name(network.akm)
+        cipher = get_cipher_name(network.cipher)
+
+        print(f"{ssid:<22} {network.bssid:<18} {signal_str:<12} {security:<15} {cipher:<12}")
+
+        collected_data.append({
+            "Tarih": timestamp,
+            "SSID": ssid,
+            "BSSID": network.bssid,
+            "Sinyal_dBm": network.signal,
+            "Kalite_Yuzde": quality,
+            "Guvenlik": security,
+            "Sifreleme": cipher
+        })
+
+    if log_to_file and collected_data:
+        filename = "wifi_scan_log.csv"
+        file_exists = False
+        try:
+            with open(filename, "r"): file_exists = True
+        except FileNotFoundError: pass
+
+        with open(filename, mode="a", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=collected_data[0].keys())
+            if not file_exists:
+                writer.writeheader()
+            writer.writerows(collected_data)
+            
+        print(f"\n[+] Sonuçlar '{filename}' dosyasına kaydedildi.")
+        input("\nÇıkmak için entere basın")
+
+if __name__ == "__main__":
+    etraftaki_wifilari_tara()
